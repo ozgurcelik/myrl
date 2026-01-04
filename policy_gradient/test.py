@@ -2,8 +2,8 @@
 # Load model directly
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B")
-model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B")
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
+model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
 messages = [
     {"role": "user", "content": "Who are you?"},
 ]

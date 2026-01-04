@@ -106,22 +106,50 @@ class PolicyGradient(object):
         path_returns = np.array(path_returns)
         return path_returns
     
-    def calculate_advantage(self, returns, observations):
-        # return returns
+    def calculate_advantage(self, targets, observations):
+        """Advantage: A_t = target_t - V(s_t)"""
         observations = np2torch(observations)
         baseline = self.baseline(observations).detach().numpy()
         baseline = baseline.squeeze()
-        advantages = returns - baseline
+        advantages = targets - baseline
         return advantages
+    
+    def get_td_targets(self, paths):
+        """
+        Compute TD(0) targets: r_t + gamma * V(s_{t+1})
+        For terminal states, the target is just r_t (no bootstrapping)
+        """
+        all_td_targets = []
+        for path in paths:
+            observations = path['observation']
+            rewards = path['reward']
+            T = len(rewards)
+            
+            # Get value estimates for all states
+            obs_tensor = np2torch(observations)
+            values = self.baseline(obs_tensor).detach().numpy().squeeze()
+            
+            td_targets = np.zeros(T)
+            for t in range(T):
+                if t == T - 1:
+                    # Terminal state: target is just the reward
+                    td_targets[t] = rewards[t]
+                else:
+                    # TD(0) target: r_t + gamma * V(s_{t+1})
+                    td_targets[t] = rewards[t] + self.gamma * values[t + 1]
+            
+            all_td_targets.append(td_targets)
+        return all_td_targets
     
     def normalize_advantage(self, advantages):
         return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
     
-    def update_baseline(self, returns, observations):
+    def update_baseline(self, targets, observations):
+        """Update baseline to predict targets"""
         observations = np2torch(observations)
-        returns = np2torch(returns)
+        targets = np2torch(targets)
         baseline = self.baseline(observations).squeeze()
-        loss = nn.functional.mse_loss(baseline, returns)
+        loss = nn.functional.mse_loss(baseline, targets)
         self.baseline_optimizer.zero_grad()
         loss.backward()
         self.baseline_optimizer.step()
@@ -138,22 +166,36 @@ class PolicyGradient(object):
         loss.backward()
         self.optimizer.step()
 
-    def train(self):
+    def train(self, method='monte_carlo'):
+        """
+        Train the policy using different advantage estimation methods.
+        
+        Args:
+            method: 'monte_carlo' or 'td'
+        """
         avg_rewards = []
         for i in range(self.num_batches):
             paths = self.sample_path()
-            path_returns = self.get_returns(paths)
-            path_returns = np.concatenate(path_returns)
-
+            
             observations = np.concatenate([path['observation'] for path in paths])
             actions = np.concatenate([path['action'] for path in paths])
             rewards = np.concatenate([path['reward'] for path in paths])
             avg_rewards.append(np.array([path['reward'].sum() for path in paths]).mean())
 
-            advantages = self.calculate_advantage(path_returns, observations)
+            if method == 'monte_carlo':
+                # Monte Carlo approach: use full episode returns
+                targets = self.get_returns(paths)
+                targets = np.concatenate(targets)
+            elif method == 'td':
+                # TD(0) approach: use bootstrapped targets
+                targets = self.get_td_targets(paths)
+                targets = np.concatenate(targets)
+            else:
+                raise ValueError(f"Unknown method: {method}. Choose from 'monte_carlo' or 'td'")
+            
+            advantages = self.calculate_advantage(targets, observations)
             advantages = self.normalize_advantage(advantages)
-
-            self.update_baseline(path_returns, observations)
+            self.update_baseline(targets, observations)
             self.update_policy(observations, actions, advantages)
 
             if (i+1) % 10 == 0:
