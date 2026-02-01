@@ -1,0 +1,101 @@
+You're using a Qwen2TokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+  [EVAL] Epoch 1: Test Reward (greedy): 0.0360
+  [DEBUG] rewards: [0.05000000074505806, 0.05000000074505806, 0.0, 0.05000000074505806, 0.0, 0.0, 0.0, 0.05000000074505806, 0.05000000074505806, 0.0, 0.05000000074505806, 0.05000000074505806, 0.0, 0.05000000074505806, 0.05000000074505806, 0.05999999865889549]
+  [DEBUG] advantages: [0.4999997913837433, 0.4999997913837433, -1.4999995231628418, 0.4999997913837433, -0.4999998211860657, -0.4999998211860657, -0.4999998211860657, 1.4999995231628418, 0.4999997913837433, -1.4999995231628418, 0.4999997913837433, 0.4999997913837433, -1.4770973920822144, 0.36927440762519836, 0.36927440762519836, 0.7385486960411072]
+  [DEBUG] gradient norm: 10.585311
+  [DEBUG] gradient norm: 794.819519
+Epoch 1/50
+ 	Loss: 1.5547
+ 	Reward: 0.0319
+  [DEBUG] gradient norm: 7.320709
+  [DEBUG] gradient norm: 9.990800
+Epoch 2/50
+ 	Loss: 0.0084
+ 	Reward: 0.0100
+  [DEBUG] gradient norm: 6.130115
+  [DEBUG] gradient norm: 69.298607
+Epoch 3/50
+ 	Loss: 0.0055
+ 	Reward: 0.0094
+  [DEBUG] gradient norm: 5.875338
+  [DEBUG] gradient norm: 4.966811
+Epoch 4/50
+ 	Loss: 0.0027
+ 	Reward: 0.0063
+  [EVAL] Epoch 5: Test Reward (greedy): 0.0188
+  [DEBUG] gradient norm: 7.158743
+  [DEBUG] gradient norm: 6.401497
+Epoch 5/50
+ 	Loss: 0.0006
+ 	Reward: 0.0188
+  [DEBUG] gradient norm: 7.340600
+  [DEBUG] gradient norm: 5.408970
+Epoch 6/50
+ 	Loss: 0.0022
+ 	Reward: 0.0250
+  [DEBUG] gradient norm: 7.379382
+  [DEBUG] gradient norm: 6.135603
+Epoch 7/50
+ 	Loss: 0.0011
+ 	Reward: 0.0250
+  [DEBUG] gradient norm: 5.397769
+  [DEBUG] gradient norm: 4.211870
+Epoch 8/50
+ 	Loss: 0.0037
+ 	Reward: 0.0344
+  [DEBUG] gradient norm: 4.821641
+  [DEBUG] gradient norm: 4.187547
+Epoch 9/50
+ 	Loss: 0.0045
+ 	Reward: 0.0406
+  [EVAL] Epoch 10: Test Reward (greedy): 0.0438
+  [DEBUG] gradient norm: 5.812917
+  [DEBUG] gradient norm: 5.085320
+Epoch 10/50
+ 	Loss: 0.0062
+ 	Reward: 0.0406
+  [DEBUG] gradient norm: 3.855563
+  [DEBUG] gradient norm: 2.729870
+Epoch 11/50
+ 	Loss: 0.0096
+ 	Reward: 0.0469
+  [DEBUG] gradient norm: 1.407524
+  [DEBUG] gradient norm: 0.390875
+Epoch 12/50
+ 	Loss: 0.0113
+ 	Reward: 0.0500
+  [DEBUG] gradient norm: 6.401495
+  [DEBUG] gradient norm: 2.646921
+Epoch 13/50
+ 	Loss: 0.0119
+ 	Reward: 0.0469
+  [DEBUG] gradient norm: 2.487077
+  [DEBUG] gradient norm: 2.055548
+Epoch 14/50
+ 	Loss: 0.0094
+ 	Reward: 0.0469
+  [EVAL] Epoch 15: Test Reward (greedy): 0.0500
+  [DEBUG] gradient norm: 4.716521
+  [DEBUG] gradient norm: 3.072970
+Epoch 15/50
+ 	Loss: 0.0091
+ 	Reward: 0.0438
+  [DEBUG] gradient norm: 0.375408
+  [DEBUG] gradient norm: 0.342924
+Epoch 16/50
+ 	Loss: 0.0132
+ 	Reward: 0.0500
+Traceback (most recent call last):
+  File "/Users/ozgurcelik/Desktop/rl/myrl/grpo/main.py", line 843, in <module>
+    trained_model, losses, rewards, eval_rewards = grpo(
+                                                   ^^^^^
+  File "/Users/ozgurcelik/Desktop/rl/myrl/grpo/main.py", line 813, in grpo
+    loss.backward()
+  File "/Users/ozgurcelik/miniconda3/envs/rlvenv/lib/python3.12/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/Users/ozgurcelik/miniconda3/envs/rlvenv/lib/python3.12/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/Users/ozgurcelik/miniconda3/envs/rlvenv/lib/python3.12/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

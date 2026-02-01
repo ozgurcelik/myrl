@@ -198,3 +198,9 @@ def reward_function(
             "answer_reward": answer_reward,
         },
     }
+
+if __name__ == "__main__":
+    numbers = [1, 2, 3, 4]
+    target = 10
+    response = "1 + 2 + 3 + 4 = 10</think>\n<answer>(1 + 2 + 3 + 4)</answer>"
+    print(reward_function(response, numbers, target))
