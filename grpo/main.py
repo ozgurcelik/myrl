@@ -854,6 +854,6 @@ if __name__ == "__main__":
         learning_rate=5e-6,
         test_freq=5,
         use_wandb=True,
-        wandb_project="grpo-countdown",
+        wandb_project="metre_tests",
         wandb_run_name="grpo-test-run",
     )
