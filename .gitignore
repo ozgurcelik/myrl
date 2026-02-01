@@ -1,2 +1,7 @@
 results/
+.cache/
+.venv/
 
+**/wandb/
+*.pyc
+__pycache__/

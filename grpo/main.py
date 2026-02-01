@@ -532,6 +532,7 @@ def grpo(
         learning_rate: float = 1e-5,
         test_freq: int = 5,
         use_wandb: bool = True,
+        wandb_entity: str = "erencetin",
         wandb_project: str = "grpo-countdown",
         wandb_run_name: Optional[str] = None,
         ):
@@ -608,12 +609,18 @@ def grpo(
         ...     num_return_sequences=4,
         ... )
     """
-    device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else: 
+        device = torch.device("cpu")
+
     # Use bfloat16 for balance between stability and memory (float16 on MPS can cause NaN issues)
-    dtype = torch.bfloat16 if device.type != "mps" else torch.float32
+    dtype = torch.bfloat16 if device.type not in ("mps", "cuda") else torch.float32
     # For MPS, we need to be careful with memory - use smaller batch or gradient checkpointing
-    model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype, low_cpu_mem_usage=True).to(device)
-    ref_model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype, low_cpu_mem_usage=True).to(device)
+    model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype, low_cpu_mem_usage=True).to(device)
+    ref_model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype, low_cpu_mem_usage=True).to(device)
     ref_model.eval()  # Reference model should always be in eval mode
     for param in ref_model.parameters():
         param.requires_grad = False  # Freeze reference model
@@ -622,6 +629,7 @@ def grpo(
     run = None
     if use_wandb:
         run = wandb.init(
+            entity=wandb_entity,
             project=wandb_project,
             name=wandb_run_name,
             config={
@@ -683,6 +691,8 @@ def grpo(
                         break
                     if device.type == "mps":
                         torch.mps.empty_cache()
+                    elif device.type == "cuda":
+                        torch.cuda.empty_cache()
                     # Generate with temperature=0 (greedy)
                     test_completion_output = generate_responses(
                         model,
@@ -724,6 +734,9 @@ def grpo(
             # Clear MPS cache to prevent memory buildup
             if device.type == "mps":
                 torch.mps.empty_cache()
+            elif device.type == "cuda":
+                torch.cuda.empty_cache()
+
             batch = next(iter(dl_train))
             rollout_output = generate_rollouts(
                 model,
@@ -849,11 +862,12 @@ if __name__ == "__main__":
         update_freq=2,
         max_new_tokens=256,  # Reduced for memory
         temperature=0.6,
-        num_return_sequences=4,  # Reduced for memory
+        num_return_sequences=8,  # Reduced for memory
         epsilon=0.2,
         learning_rate=5e-6,
         test_freq=5,
         use_wandb=True,
+        wandb_entity="dirtem1998",
         wandb_project="metre_tests",
         wandb_run_name="grpo-test-run",
     )
