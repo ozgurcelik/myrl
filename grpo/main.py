@@ -535,6 +535,9 @@ def grpo(
         wandb_entity: str = "erencetin",
         wandb_project: str = "grpo-countdown",
         wandb_run_name: Optional[str] = None,
+        use_curriculum: bool = True,
+        curriculum_phase1_end: int = 100,
+        curriculum_phase2_end: int = 200,
         ):
     """
     Main GRPO (Group Relative Policy Optimization) training loop.
@@ -561,6 +564,9 @@ def grpo(
         use_wandb: Whether to log metrics to Weights & Biases.
         wandb_project: W&B project name.
         wandb_run_name: W&B run name (optional).
+        use_curriculum: Whether to use curriculum learning based on difficulty.
+        curriculum_phase1_end: Global step at which phase 1 ends (only difficulty 2).
+        curriculum_phase2_end: Global step at which phase 2 ends (difficulty 2 and 3).
     
     Returns:
         tuple of:
@@ -588,6 +594,12 @@ def grpo(
               - Compute GRPO loss (clipped surrogate + KL penalty)
               - Backpropagate and update model parameters
               - Apply gradient clipping for stability
+    
+    Curriculum Learning (when use_curriculum=True):
+        - Phase 1 (steps 0 to phase1_end-1): Only difficulty 2 samples
+        - Phase 2 (steps phase1_end to phase2_end-1): Difficulty 2 and 3 samples
+        - Phase 3 (steps phase2_end+): All difficulties (2, 3, 4)
+        - Samples used in earlier phases are not reused until full dataset loop
     
     Key GRPO Components:
         - **Group-based advantages**: No value network needed
@@ -646,6 +658,9 @@ def grpo(
                 "test_freq": test_freq,
                 "device": str(device),
                 "dtype": str(dtype),
+                "use_curriculum": use_curriculum,
+                "curriculum_phase1_end": curriculum_phase1_end,
+                "curriculum_phase2_end": curriculum_phase2_end,
             },
         )
 
@@ -660,12 +675,28 @@ def grpo(
         test_size=100,
     )
 
-    dl_train = DataLoader(
-        ds_train,
-        batch_size=batch_size,
-        shuffle=True,
-        collate_fn=ds_train.collate_fn,
-    )
+    # Create curriculum sampler if enabled
+    curriculum_sampler = None
+    if use_curriculum:
+        curriculum_sampler = CurriculumSampler(
+            dataset=ds_train,
+            batch_size=batch_size,
+            phase1_end=curriculum_phase1_end,
+            phase2_end=curriculum_phase2_end,
+        )
+        dl_train = DataLoader(
+            ds_train,
+            batch_sampler=curriculum_sampler,
+            collate_fn=ds_train.collate_fn,
+        )
+    else:
+        dl_train = DataLoader(
+            ds_train,
+            batch_size=batch_size,
+            shuffle=True,
+            collate_fn=ds_train.collate_fn,
+        )
+    
     dl_test = DataLoader(
         ds_test,
         batch_size=batch_size,
@@ -737,6 +768,15 @@ def grpo(
             elif device.type == "cuda":
                 torch.cuda.empty_cache()
 
+            # Update curriculum sampler with current global step before fetching batch
+            if curriculum_sampler is not None:
+                curriculum_sampler.set_global_step(global_step)
+                current_phase = "Phase 1 (diff=2)" if global_step < curriculum_phase1_end else \
+                               "Phase 2 (diff=2,3)" if global_step < curriculum_phase2_end else \
+                               "Phase 3 (all)"
+                if global_step % 50 == 0:  # Log curriculum phase periodically
+                    print(f"  [CURRICULUM] Step {global_step}: {current_phase}")
+
             batch = next(iter(dl_train))
             rollout_output = generate_rollouts(
                 model,
@@ -786,6 +826,14 @@ def grpo(
                 wandb.log({"samples/train_generations": table, "train/epoch": epoch + 1}, step=global_step)
 
             if use_wandb:
+                # Log curriculum phase
+                if curriculum_sampler is not None:
+                    curriculum_phase = 1 if global_step < curriculum_phase1_end else \
+                                      2 if global_step < curriculum_phase2_end else 3
+                    wandb.log(
+                        {"train/curriculum_phase": curriculum_phase},
+                        step=global_step,
+                    )
                 wandb.log(
                     {
                         "train/rewards": rewards.tolist(),
