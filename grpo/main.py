@@ -778,6 +778,7 @@ def grpo(
                     print(f"  [CURRICULUM] Step {global_step}: {current_phase}")
 
             batch = next(iter(dl_train))
+            print("Batch[0]:", batch[0])
             rollout_output = generate_rollouts(
                 model,
                 ref_model,

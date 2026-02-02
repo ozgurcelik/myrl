@@ -233,7 +233,7 @@ def format_reward_function(response: str, end_token: Optional[str] = None) -> fl
         response = response[: -len(end_token)]
 
     think_regex = r"<think>.*?<\/think>"
-    answer_regex = r"<answer>.*?<\/answer>"
+    answer_regex = r"<answer>.*?<\/answer>\s*$"
     full_format_regex = r"^<think>.*?<\/think>\n<answer>.*?<\/answer>$"
 
     think_match = re.search(think_regex, response, re.DOTALL)
@@ -245,12 +245,14 @@ def format_reward_function(response: str, end_token: Optional[str] = None) -> fl
 
     reward = 0.0
 
+    if answer_match:
+        using_every_number_once = float(is_using_numbers_once(answer_match))
+    
+    think_response_order_correct = float(is_thinking_after_response(response))
+    think_answer_appears_once = float(is_think_answer_appear_once(response))
+
     # Check for exactly one <think> and one </think>
-    if think_match:
-        think_open_count = response.count("<think>")
-        think_close_count = response.count("</think>")
-        if think_open_count == 1 and think_close_count == 1:
-            reward += 0.1
+    reward += 0.2 * (think_answer_appears_once + using_every_number_once + think_response_order_correct)
 
     if answer_match:
         reward += 0.5
@@ -288,8 +290,7 @@ def answer_reward_function(
         if abs(float(result) - float(target)) < 1e-5:
             return 1.0
     except Exception as e:
-        print("Evaluation error:", e)
-        return -0.1
+        pass
 
     return 0.0
 
@@ -306,8 +307,6 @@ def reward_function(
     """
     format_reward = format_reward_function("<think>" + response, end_token)
     answer_reward = answer_reward_function(response, numbers, target)
-    think_response_order_reward = is_thinking_after_response(response)
-    using_number_once_reward = is_using_numbers_once(response)
 
     return {
         "reward": format_reward * 0.1 + answer_reward,
@@ -322,17 +321,31 @@ def is_thinking_after_response(response: str) -> float:
     """Check if the response, <answer>...</answer> appears before <think>...</think>."""
     think_index = response.find("<think>")
     answer_index = response.find("<answer>")
+    think_end_index = response.find("</think>")
+    answer_end_index = response.find("</answer>")
     if think_index == -1 or answer_index == -1:
         return False
-    return (answer_index > think_index)
+    return (
+        (answer_index > think_index) and 
+        (answer_end_index > think_end_index) and 
+        (answer_index > think_end_index)
+    )
+
+def is_think_answer_appear_once(response: str) -> float:
+    """Check if <think>...</think> and <answer>...</answer> appear exactly once."""
+    think_open_count = response.count("<think>")
+    think_close_count = response.count("</think>")
+    answer_open_count = response.count("<answer>")
+    answer_close_count = response.count("</answer>")
+    if think_open_count == 1 and think_close_count == 1 and answer_open_count == 1 and answer_close_count == 1:
+        return True
+    return False
 
 
-def is_using_numbers_once(response: str) -> float:
+def is_using_numbers_once(answer_match: str) -> float:
     """
     Checks if the answer uses all numbers exactly once and evaluates to the target
     """
-    answer_regex = r"<answer>(.*?)<\/answer>"
-    answer_match = re.search(answer_regex, response, re.DOTALL)
     if not answer_match:
         return 0.0
 
