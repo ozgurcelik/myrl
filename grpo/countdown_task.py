@@ -215,15 +215,14 @@ class CurriculumSampler(Sampler[int]):
         
         return batch_indices
     
-    def __iter__(self) -> Iterator[int]:
-        """Yield indices for one batch based on current curriculum phase."""
+    def __iter__(self) -> Iterator[List[int]]:
+        """Yield a batch of indices based on current curriculum phase."""
         batch_indices = self._sample_batch()
-        for idx in batch_indices:
-            yield idx
+        yield batch_indices
     
     def __len__(self) -> int:
-        """Return the batch size (number of samples per iteration)."""
-        return self.batch_size
+        """Return 1 since we yield one batch per iteration."""
+        return 1
 # %%
 def format_reward_function(response: str, end_token: Optional[str] = None) -> float:
     """

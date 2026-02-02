@@ -910,7 +910,7 @@ if __name__ == "__main__":
         update_freq=2,
         max_new_tokens=256,  # Reduced for memory
         temperature=0.6,
-        num_return_sequences=8,  # Reduced for memory
+        num_return_sequences=4,  # Reduced for memory
         epsilon=0.2,
         learning_rate=5e-6,
         test_freq=5,
