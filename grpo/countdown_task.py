@@ -4,6 +4,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 from torch.utils.data import Dataset, Sampler
 from typing import Any, Dict, List, Iterator
+from collections import Counter
 import re
 from typing import Optional
 import random
@@ -55,7 +56,7 @@ class CountdownTaskDataset(Dataset):
     def __init__(self, tokenizer: AutoTokenizer, split="train", test_size=100):
         data = load_dataset("ozgur-celik/countdown_cl")
         self.tokenizer = tokenizer
-        self.test_size = test_size
+        # self.test_size = test_size
         self.split = split
         if self.split == "train":
             self.data = data["train"]
@@ -245,14 +246,11 @@ def format_reward_function(response: str, end_token: Optional[str] = None) -> fl
 
     reward = 0.0
 
-    if answer_match:
-        using_every_number_once = float(is_using_numbers_once(answer_match))
-    
     think_response_order_correct = float(is_thinking_after_response(response))
     think_answer_appears_once = float(is_think_answer_appear_once(response))
 
     # Check for exactly one <think> and one </think>
-    reward += 0.2 * (think_answer_appears_once + using_every_number_once + think_response_order_correct)
+    reward += 0.05 * (think_answer_appears_once + think_response_order_correct)
 
     if answer_match:
         reward += 0.5
@@ -271,7 +269,7 @@ def answer_reward_function(
     if not answer_match:
         return 0.0
 
-    answer_content = answer_match.group(1)
+    answer_content = answer_match.group(0)
     if not answer_content:
         return 0.0
 
@@ -283,16 +281,43 @@ def answer_reward_function(
     used_numbers = [int(n) for n in re.findall(r"\d+", answer_content)]
     if sorted(used_numbers) != sorted(numbers):
         return 0.0
+    
+    reward = 0.0
 
+    using_every_number_once = 0.0
+    if answer_match:
+        using_every_number_once = float(is_using_numbers_once(answer_match))
+
+        answer_txt = answer_match.group(0)
+        if "=" in answer_txt:
+            options = answer_txt.split("=")
+            # Longer one is the math expression
+            if len(options[0].strip()) >= len(options[1].strip()):
+                answer_content = options[0].strip()
+                answer_is_correct = float(is_answer_correct(answer_content, target))
+            else:
+                answer_content = options[1].strip()
+                answer_is_correct = float(is_answer_correct(answer_content, target))
+
+            reward += -0.1 + answer_is_correct * 0.2
+            
+    
+    
     # Check if the answer evaluates to the target
     try:
-        result = eval(answer_content, {"__builtins__": None}, {})
-        if abs(float(result) - float(target)) < 1e-5:
-            return 1.0
+        if is_answer_correct(answer_content, target):
+            return 1.0 + using_every_number_once * 0.1
     except Exception as e:
         pass
 
-    return 0.0
+    return reward + 0.0 + using_every_number_once * 0.1
+
+
+def is_answer_correct(answer_content: str, target: int) -> bool:
+    result = eval(answer_content, {"__builtins__": None}, {})
+    if abs(float(result) - float(target)) < 1e-5:
+        return True
+    return False
 
 
 def reward_function(
@@ -342,14 +367,14 @@ def is_think_answer_appear_once(response: str) -> float:
     return False
 
 
-def is_using_numbers_once(answer_match: str) -> float:
+def is_using_numbers_once(answer_match: str, numbers: list[int], target: int) -> float:
     """
     Checks if the answer uses all numbers exactly once and evaluates to the target
     """
     if not answer_match:
         return 0.0
 
-    answer_content = answer_match.group(1)
+    answer_content = answer_match.group(0)
     if not answer_content:
         return 0.0
 
@@ -359,8 +384,11 @@ def is_using_numbers_once(answer_match: str) -> float:
 
     # Check if the answer uses all numbers exactly once
     used_numbers = [int(n) for n in re.findall(r"\d+", answer_content)]
-    if len(used_numbers) == len(set(used_numbers)):
+    if Counter(used_numbers) == Counter(numbers):
         return 1.0
+        
+    if Counter(numbers + [target]) == Counter(used_numbers):
+        return 0.8
     
     return 0.0
     

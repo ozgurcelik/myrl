@@ -402,9 +402,9 @@ def generate_rollouts(model: AutoModelForCausalLM,
                       "rewards": rewards,
                       "advantages": advantages
                     }
-    if debug:
-        print(f"  [DEBUG] rewards: {rewards.tolist()}")
-        print(f"  [DEBUG] advantages: {advantages.tolist()}")
+    # if debug:
+    #     print(f"  [DEBUG] rewards: {rewards.tolist()}")
+    #     print(f"  [DEBUG] advantages: {advantages.tolist()}")
     return rollout_output
 
 def grpo_loss(
@@ -536,7 +536,7 @@ def grpo(
         wandb_project: str = "grpo-countdown",
         wandb_run_name: Optional[str] = None,
         use_curriculum: bool = True,
-        curriculum_phase1_end: int = 100,
+        curriculum_phase1_end: int = 50,
         curriculum_phase2_end: int = 200,
         ):
     """
@@ -699,7 +699,7 @@ def grpo(
     
     dl_test = DataLoader(
         ds_test,
-        batch_size=batch_size,
+        batch_size=batch_size * 2,
         shuffle=False,
         collate_fn=ds_test.collate_fn,
     )
@@ -718,12 +718,12 @@ def grpo(
             test_batches = 0
             with torch.no_grad():
                 for test_batch_idx, test_batch in enumerate(dl_test):
-                    if test_batch_idx >= 10:
+                    if test_batch_idx >= 1:
                         break
-                    if device.type == "mps":
-                        torch.mps.empty_cache()
-                    elif device.type == "cuda":
-                        torch.cuda.empty_cache()
+                    # if device.type == "mps":
+                    #     torch.mps.empty_cache()
+                    # elif device.type == "cuda":
+                    #     torch.cuda.empty_cache()
                     # Generate with temperature=0 (greedy)
                     test_completion_output = generate_responses(
                         model,
@@ -778,7 +778,7 @@ def grpo(
                     print(f"  [CURRICULUM] Step {global_step}: {current_phase}")
 
             batch = next(iter(dl_train))
-            print("Batch[0]:", batch[0])
+            print("Batch[0]:", batch.numbers[0])
             rollout_output = generate_rollouts(
                 model,
                 ref_model,
@@ -874,7 +874,7 @@ def grpo(
                 optimizer.zero_grad()
                 loss.backward()
                 global_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1e9)
-                print(f"  [DEBUG] gradient norm: {global_norm:.6f}")
+                # print(f"  [DEBUG] gradient norm: {global_norm:.6f}")
                 # Gradient clipping to prevent exploding gradients
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
@@ -906,7 +906,7 @@ if __name__ == "__main__":
         model_id=model_id,
         dataset=CountdownTaskDataset,
         batch_size=4,  # Reduced for memory
-        num_epochs=50,
+        num_epochs=100,
         batch_per_epoch=1,
         update_freq=2,
         max_new_tokens=256,  # Reduced for memory
