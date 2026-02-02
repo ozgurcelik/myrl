@@ -287,8 +287,9 @@ def answer_reward_function(
         result = eval(answer_content, {"__builtins__": None}, {})
         if abs(float(result) - float(target)) < 1e-5:
             return 1.0
-    except:
-        pass
+    except Exception as e:
+        print("Evaluation error:", e)
+        return -0.1
 
     return 0.0
 
@@ -305,6 +306,9 @@ def reward_function(
     """
     format_reward = format_reward_function("<think>" + response, end_token)
     answer_reward = answer_reward_function(response, numbers, target)
+    think_response_order_reward = is_thinking_after_response(response)
+    using_number_once_reward = is_using_numbers_once(response)
+
     return {
         "reward": format_reward * 0.1 + answer_reward,
         "reward_info": {
@@ -312,6 +316,41 @@ def reward_function(
             "answer_reward": answer_reward,
         },
     }
+
+
+def is_thinking_after_response(response: str) -> float:
+    """Check if the response, <answer>...</answer> appears before <think>...</think>."""
+    think_index = response.find("<think>")
+    answer_index = response.find("<answer>")
+    if think_index == -1 or answer_index == -1:
+        return False
+    return (answer_index > think_index)
+
+
+def is_using_numbers_once(response: str) -> float:
+    """
+    Checks if the answer uses all numbers exactly once and evaluates to the target
+    """
+    answer_regex = r"<answer>(.*?)<\/answer>"
+    answer_match = re.search(answer_regex, response, re.DOTALL)
+    if not answer_match:
+        return 0.0
+
+    answer_content = answer_match.group(1)
+    if not answer_content:
+        return 0.0
+
+    allowed_chars = r"^[0-9+\-*/() ]+$"
+    if not re.match(allowed_chars, answer_content):
+        return 0.0
+
+    # Check if the answer uses all numbers exactly once
+    used_numbers = [int(n) for n in re.findall(r"\d+", answer_content)]
+    if len(used_numbers) == len(set(used_numbers)):
+        return 1.0
+    
+    return 0.0
+    
 
 if __name__ == "__main__":
     numbers = [1, 2, 3, 4]
