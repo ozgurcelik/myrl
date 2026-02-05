@@ -923,7 +923,7 @@ def grpo(
     return model, avg_losses, avg_rewards, eval_rewards
 
 if __name__ == "__main__":
-    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+    model_id = "Qwen/Qwen2.5-1.5B-Instruct"
     trained_model, losses, rewards, eval_rewards = grpo(
         model_id=model_id,
         dataset=CountdownTaskDataset,

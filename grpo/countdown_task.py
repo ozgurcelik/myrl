@@ -276,8 +276,8 @@ def answer_reward_function(
     if not re.match(allowed_chars, answer_content):
         return {"reward": 0.0, "number_usage_reward": 0.0, "correctness_reward": 0.0}
 
-    if is_answer_correct(answer_content, target):
-        return {"reward": 1.0, "number_usage_reward": 1.0, "correctness_reward": 1.0}
+    # if is_answer_correct(answer_content, target):
+    #     return {"reward": 1.0, "number_usage_reward": 1.0, "correctness_reward": 1.0}
 
     reward = 0.0
     number_usage_reward = 0.0
@@ -285,7 +285,7 @@ def answer_reward_function(
 
     if answer_match:
         number_usage_reward = float(number_usage_reward_function(answer_content, numbers, target))
-        reward += number_usage_reward * 0.2
+        reward += number_usage_reward * 0.5
 
         if "=" in answer_content:
             options = answer_content.split("=")
@@ -294,8 +294,10 @@ def answer_reward_function(
                 correctness_reward = float(is_answer_correct(options[0].strip(), target))
             else:
                 correctness_reward = float(is_answer_correct(options[1].strip(), target))
+        else:
+            correctness_reward = float(is_answer_correct(answer_content, target))
 
-            reward += correctness_reward * 0.5
+        reward += correctness_reward * 0.5
             
     return {
         "reward": reward,
