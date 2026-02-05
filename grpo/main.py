@@ -895,7 +895,8 @@ if __name__ == "__main__":
     trained_model, losses, rewards, eval_rewards = grpo(
         model_id=model_id,
         dataset=CountdownTaskDataset,
-        batch_size=4,  # Reduced for memory
+        train_batch_size=4,  # Reduced for memory
+        test_batch_size=8,  # Reduced for memory
         num_epochs=100,
         batch_per_epoch=1,
         update_freq=2,
