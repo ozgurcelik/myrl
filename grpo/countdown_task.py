@@ -256,45 +256,49 @@ def format_reward_function(response: str, end_token: Optional[str] = None) -> fl
 
 def answer_reward_function(
     response: str, numbers: List[int] = None, target: int = None
-) -> float:
+) -> Dict[str, float]:
     """
-    Checks if the answer uses all numbers exactly once and evaluates to the target
+    Checks if the answer uses all numbers exactly once and evaluates to the target.
+    
+    Returns:
+        Dict with 'reward', 'number_usage_reward', and 'correctness_reward' keys.
     """
     answer_regex = r"<answer>(.*?)<\/answer>"
     answer_match = re.search(answer_regex, response, re.DOTALL)
     if not answer_match:
-        return 0.0
+        return {"reward": 0.0, "number_usage_reward": 0.0, "correctness_reward": 0.0}
 
     answer_content = answer_match.group(0)
     if not answer_content:
-        return 0.0
+        return {"reward": 0.0, "number_usage_reward": 0.0, "correctness_reward": 0.0}
 
     allowed_chars = r"^[0-9+\-*/() ]+$"
     if not re.match(allowed_chars, answer_content):
-        return 0.0
+        return {"reward": 0.0, "number_usage_reward": 0.0, "correctness_reward": 0.0}
 
-    # # Check if the answer uses all numbers exactly once
-    # # Mesela icine targeti da koyduysa burasi exit etmemize sebep olacak
-    # used_numbers = [int(n) for n in re.findall(r"\d+", answer_content)]
-    # if sorted(used_numbers) != sorted(numbers):
-    #     return 0.0
-    
     reward = 0.0
+    number_usage_reward = 0.0
+    correctness_reward = 0.0
 
     if answer_match:
-        reward += float(number_usage_reward_function(answer_content, numbers, target)) * 0.2
+        number_usage_reward = float(number_usage_reward_function(answer_content, numbers, target))
+        reward += number_usage_reward * 0.2
 
         if "=" in answer_content:
             options = answer_content.split("=")
             # Longer one is the math expression
             if len(options[0].strip()) >= len(options[1].strip()):
-                answer_is_correct = float(is_answer_correct(options[0].strip(), target))
+                correctness_reward = float(is_answer_correct(options[0].strip(), target))
             else:
-                answer_is_correct = float(is_answer_correct(options[1].strip(), target))
+                correctness_reward = float(is_answer_correct(options[1].strip(), target))
 
-            reward += answer_is_correct * 0.5
+            reward += correctness_reward * 0.5
             
-    return reward
+    return {
+        "reward": reward,
+        "number_usage_reward": number_usage_reward,
+        "correctness_reward": correctness_reward,
+    }
 
 
 def is_answer_correct(answer_content: str, target: int) -> bool:
@@ -313,15 +317,22 @@ def reward_function(
     """Reward function for Countdown Tasks.
 
     Total reward = 0.1 * format_reward + answer_reward
+    
+    Returns:
+        Dict with:
+            - reward: total reward score
+            - reward_info: detailed breakdown of all reward components
     """
     format_reward = format_reward_function("<think>" + response, end_token)
-    answer_reward = answer_reward_function(response, numbers, target)
+    answer_result = answer_reward_function(response, numbers, target)
 
     return {
-        "reward": format_reward * 0.1 + answer_reward,
+        "reward": format_reward * 0.1 + answer_result["reward"],
         "reward_info": {
             "format_reward": format_reward,
-            "answer_reward": answer_reward,
+            "answer_reward": answer_result["reward"],
+            "number_usage_reward": answer_result["number_usage_reward"],
+            "correctness_reward": answer_result["correctness_reward"],
         },
     }
 

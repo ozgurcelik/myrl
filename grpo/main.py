@@ -197,7 +197,7 @@ def calculate_rewards(
     numbers: List[List[int]],
     targets: List[int],
     end_token: Optional[str] = None,
-    ) -> torch.Tensor:
+    ) -> Dict[str, torch.Tensor]:
     """
     Calculate reward scores for each generated answer using the task-specific reward function.
     
@@ -214,14 +214,20 @@ def calculate_rewards(
         end_token: Optional end token to strip from responses before evaluation.
     
     Returns:
-        torch.Tensor: [B * num_return_sequences] - Reward score for each generated answer.
+        Dict containing:
+            - rewards: [B * num_return_sequences] - Total reward score for each generated answer.
+            - reward_info: Dict of [B * num_return_sequences] tensors for each reward component:
+                - format_reward: Score for following the expected format
+                - answer_reward: Score for the answer quality
+                - number_usage_reward: Score for using numbers correctly
+                - correctness_reward: Score for getting the correct answer
     
     How it works:
         1. Expand numbers and targets to match the shape of generated_answers
            (each prompt has num_return_sequences corresponding answers)
         2. For each (response, numbers, target) triple, call the reward_function
            from countdown_task.py which evaluates correctness
-        3. Collect all rewards into a tensor
+        3. Collect all rewards and reward components into tensors
     
     Note:
         The reward_function typically returns higher scores for:
@@ -230,6 +236,12 @@ def calculate_rewards(
         - Proper formatting following the expected structure
     """
     rewards = []
+    reward_info = {
+        "format_reward": [],
+        "answer_reward": [],
+        "number_usage_reward": [],
+        "correctness_reward": [],
+    }
     # repeat numbers and targets for each generated answer
     expanded_numbers = []
     expanded_targets = []
@@ -240,7 +252,13 @@ def calculate_rewards(
     for response, nums, tgt in zip(generated_answers, expanded_numbers, expanded_targets):
         reward_dict = reward_function(response, nums, tgt, end_token)
         rewards.append(reward_dict['reward'])
-    return torch.tensor(rewards, dtype=torch.float32)
+        for key in reward_info:
+            reward_info[key].append(reward_dict['reward_info'].get(key, 0.0))
+    
+    return {
+        "rewards": torch.tensor(rewards, dtype=torch.float32),
+        "reward_info": {k: torch.tensor(v, dtype=torch.float32) for k, v in reward_info.items()},
+    }
 
 def calculate_advantages(
         rewards: torch.Tensor,
@@ -366,13 +384,15 @@ def generate_rollouts(model: AutoModelForCausalLM,
         completion_output["sequences"][:, -completion_output["completion_len"]:], 
         skip_special_tokens=True
     )
-    rewards = calculate_rewards(
+    reward_result = calculate_rewards(
         generated_answers,
         num_return_sequences,
         batch.numbers,
         batch.target,
         end_token=tokenizer.eos_token,
     )
+    rewards = reward_result["rewards"]
+    reward_info = reward_result["reward_info"]
     advantages = calculate_advantages(
         rewards,
         num_return_sequences,
@@ -400,6 +420,7 @@ def generate_rollouts(model: AutoModelForCausalLM,
                       "ref_token_log_probs": ref_token_log_probs,
                       "generated_answers": generated_answers,
                       "rewards": rewards,
+                      "reward_info": reward_info,
                       "advantages": advantages
                     }
     # if debug:
@@ -730,22 +751,28 @@ def grpo(
                     test_completion_output["sequences"][:, -test_completion_output["completion_len"]:],
                     skip_special_tokens=True
                 )
-                test_rewards = calculate_rewards(
+                test_reward_result = calculate_rewards(
                     test_generated_answers,
                     num_return_sequences=1,
                     numbers=test_batch.numbers,
                     targets=test_batch.target,
                     end_token=tokenizer.eos_token,
                 )
+                test_rewards = test_reward_result["rewards"]
+                test_reward_info = test_reward_result["reward_info"]
             avg_test_reward = test_rewards.mean().item()
             eval_rewards.append((epoch + 1, avg_test_reward))
             print(f"  [EVAL] Epoch {epoch+1}: Test Reward (greedy): {avg_test_reward:.4f}")
 
             if use_wandb:
-                wandb.log(
-                    {"eval/test_reward_greedy": avg_test_reward, "epoch": epoch + 1},
-                    step=global_step,
-                )
+                eval_log = {
+                    "eval/test_reward_greedy": avg_test_reward,
+                    "epoch": epoch + 1,
+                }
+                # Log detailed reward breakdown for evaluation
+                for key, values in test_reward_info.items():
+                    eval_log[f"eval/{key}_mean"] = values.mean().item()
+                wandb.log(eval_log, step=global_step)
 
 
         model.train()
@@ -825,14 +852,18 @@ def grpo(
                         {"train/curriculum_phase": curriculum_phase},
                         step=global_step,
                     )
-                wandb.log(
-                    {
-                        "train/rewards": rewards.tolist(),
-                        "train/reward_mean": avg_reward_per_batch,
-                        "train/epoch": epoch + 1,
-                    },
-                    step=global_step,
-                )
+                # Log total rewards and detailed breakdown
+                train_log = {
+                    "train/rewards": rewards.tolist(),
+                    "train/reward_mean": avg_reward_per_batch,
+                    "train/epoch": epoch + 1,
+                }
+                # Log detailed reward breakdown
+                reward_info = rollout_output["reward_info"]
+                for key, values in reward_info.items():
+                    train_log[f"train/{key}_mean"] = values.mean().item()
+                    train_log[f"train/{key}_list"] = values.tolist()
+                wandb.log(train_log, step=global_step)
 
             for update_idx in range(update_freq):
                 completion_mask = rollout_output["attention_mask"][:, -rollout_output["completion_len"]:]
