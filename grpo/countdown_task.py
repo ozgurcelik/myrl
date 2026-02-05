@@ -273,41 +273,28 @@ def answer_reward_function(
     if not re.match(allowed_chars, answer_content):
         return 0.0
 
-    # Check if the answer uses all numbers exactly once
-    # Mesela icine targeti da koyduysa burasi exit etmemize sebep olacak
-    used_numbers = [int(n) for n in re.findall(r"\d+", answer_content)]
-    if sorted(used_numbers) != sorted(numbers):
-        return 0.0
+    # # Check if the answer uses all numbers exactly once
+    # # Mesela icine targeti da koyduysa burasi exit etmemize sebep olacak
+    # used_numbers = [int(n) for n in re.findall(r"\d+", answer_content)]
+    # if sorted(used_numbers) != sorted(numbers):
+    #     return 0.0
     
     reward = 0.0
 
-    using_every_number_once = 0.0
     if answer_match:
-        using_every_number_once = float(is_using_numbers_once(answer_match))
+        reward += float(number_usage_reward_function(answer_content, numbers, target)) * 0.2
 
-        answer_txt = answer_match.group(0)
-        if "=" in answer_txt:
-            options = answer_txt.split("=")
+        if "=" in answer_content:
+            options = answer_content.split("=")
             # Longer one is the math expression
             if len(options[0].strip()) >= len(options[1].strip()):
-                answer_content = options[0].strip()
-                answer_is_correct = float(is_answer_correct(answer_content, target))
+                answer_is_correct = float(is_answer_correct(options[0].strip(), target))
             else:
-                answer_content = options[1].strip()
-                answer_is_correct = float(is_answer_correct(answer_content, target))
+                answer_is_correct = float(is_answer_correct(options[1].strip(), target))
 
-            reward += -0.1 + answer_is_correct * 0.2
+            reward += answer_is_correct * 0.5
             
-    
-    
-    # Check if the answer evaluates to the target
-    try:
-        if is_answer_correct(answer_content, target):
-            return 1.0 + using_every_number_once * 0.1
-    except Exception as e:
-        pass
-
-    return reward + 0.0 + using_every_number_once * 0.1
+    return reward
 
 
 def is_answer_correct(answer_content: str, target: int) -> bool:
@@ -364,17 +351,10 @@ def is_think_answer_appear_once(response: str) -> float:
     return False
 
 
-def is_using_numbers_once(answer_match: str, numbers: list[int], target: int) -> float:
+def number_usage_reward_function(answer_content: str, numbers: list[int], target: int) -> float:
     """
     Checks if the answer uses all numbers exactly once and evaluates to the target
     """
-    if not answer_match:
-        return 0.0
-
-    answer_content = answer_match.group(0)
-    if not answer_content:
-        return 0.0
-
     allowed_chars = r"^[0-9+\-*/() ]+$"
     if not re.match(allowed_chars, answer_content):
         return 0.0
@@ -385,7 +365,7 @@ def is_using_numbers_once(answer_match: str, numbers: list[int], target: int) ->
         return 1.0
         
     if Counter(numbers + [target]) == Counter(used_numbers):
-        return 0.8
+        return 0.5
     
     return 0.0
     
