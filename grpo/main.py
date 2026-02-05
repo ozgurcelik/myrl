@@ -521,7 +521,8 @@ def grpo_loss(
 def grpo(
         model_id: str,
         dataset: Dataset,
-        batch_size: int = 4,
+        train_batch_size: int = 4,
+        test_batch_size: int = 8,
         num_epochs: int = 100,
         batch_per_epoch: int = 10,
         update_freq: int = 4,
@@ -551,7 +552,8 @@ def grpo(
     Args:
         model_id: HuggingFace model identifier (e.g., "Qwen/Qwen2.5-0.5B-Instruct").
         dataset: Dataset class (not instance) that will be instantiated for train/test.
-        batch_size: Number of prompts per batch.
+        train_batch_size: Number of prompts per batch for training.
+        test_batch_size: Number of prompts per batch for testing.
         num_epochs: Total number of training epochs.
         batch_per_epoch: Number of batches to process per epoch.
         update_freq: Number of gradient updates per rollout (reuses same samples).
@@ -646,7 +648,8 @@ def grpo(
             name=wandb_run_name,
             config={
                 "model_id": model_id,
-                "batch_size": batch_size,
+                "train_batch_size": train_batch_size,
+                "test_batch_size": test_batch_size,
                 "num_epochs": num_epochs,
                 "batch_per_epoch": batch_per_epoch,
                 "update_freq": update_freq,
@@ -667,12 +670,10 @@ def grpo(
     ds_train = dataset(
         tokenizer=tokenizer,
         split="train",
-        test_size=1000,
     )
     ds_test = dataset(
         tokenizer=tokenizer,
         split="test",
-        test_size=100,
     )
 
     # Create curriculum sampler if enabled
@@ -680,7 +681,7 @@ def grpo(
     if use_curriculum:
         curriculum_sampler = CurriculumSampler(
             dataset=ds_train,
-            batch_size=batch_size,
+            batch_size=train_batch_size,
             phase1_end=curriculum_phase1_end,
             phase2_end=curriculum_phase2_end,
         )
@@ -692,14 +693,14 @@ def grpo(
     else:
         dl_train = DataLoader(
             ds_train,
-            batch_size=batch_size,
+            batch_size=train_batch_size,
             shuffle=True,
             collate_fn=ds_train.collate_fn,
         )
     
     dl_test = DataLoader(
         ds_test,
-        batch_size=batch_size * 2,
+        batch_size=test_batch_size,
         shuffle=False,
         collate_fn=ds_test.collate_fn,
     )
@@ -714,40 +715,29 @@ def grpo(
         # Evaluate on test set every 5 epochs
         if (epoch + 1) % test_freq == 0 or epoch == num_epochs - 1 or epoch == 0:
             model.eval()
-            test_total_reward = 0.0
-            test_batches = 0
             with torch.no_grad():
-                for test_batch_idx, test_batch in enumerate(dl_test):
-                    if test_batch_idx >= 1:
-                        break
-                    # if device.type == "mps":
-                    #     torch.mps.empty_cache()
-                    # elif device.type == "cuda":
-                    #     torch.cuda.empty_cache()
-                    # Generate with temperature=0 (greedy)
-                    test_completion_output = generate_responses(
-                        model,
-                        tokenizer,
-                        test_batch,
-                        max_new_tokens=max_new_tokens,
-                        num_return_sequences=1,  # Greedy, so only 1 sequence
-                        temperature=1e-8,  # Near-zero for greedy (avoid division by zero)
-                        device=device,
-                    )
-                    test_generated_answers = tokenizer.batch_decode(
-                        test_completion_output["sequences"][:, -test_completion_output["completion_len"]:],
-                        skip_special_tokens=True
-                    )
-                    test_rewards = calculate_rewards(
-                        test_generated_answers,
-                        num_return_sequences=1,
-                        numbers=test_batch.numbers,
-                        targets=test_batch.target,
-                        end_token=tokenizer.eos_token,
-                    )
-                    test_total_reward += test_rewards.mean().item()
-                    test_batches += 1
-            avg_test_reward = test_total_reward / max(test_batches, 1)
+                test_batch = next(iter(dl_test))
+                test_completion_output = generate_responses(
+                    model,
+                    tokenizer,
+                    test_batch,
+                    max_new_tokens=max_new_tokens,
+                    num_return_sequences=1,  # Greedy, so only 1 sequence
+                    temperature=1e-8,  # Near-zero for greedy (avoid division by zero)
+                    device=device,
+                )
+                test_generated_answers = tokenizer.batch_decode(
+                    test_completion_output["sequences"][:, -test_completion_output["completion_len"]:],
+                    skip_special_tokens=True
+                )
+                test_rewards = calculate_rewards(
+                    test_generated_answers,
+                    num_return_sequences=1,
+                    numbers=test_batch.numbers,
+                    targets=test_batch.target,
+                    end_token=tokenizer.eos_token,
+                )
+            avg_test_reward = test_rewards.mean().item()
             eval_rewards.append((epoch + 1, avg_test_reward))
             print(f"  [EVAL] Epoch {epoch+1}: Test Reward (greedy): {avg_test_reward:.4f}")
 

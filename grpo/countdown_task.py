@@ -53,10 +53,9 @@ class MiniBatch:
 class CountdownTaskDataset(Dataset):
     """Custom Dataset for Countdown Tasks."""
 
-    def __init__(self, tokenizer: AutoTokenizer, split="train", test_size=100):
+    def __init__(self, tokenizer: AutoTokenizer, split="train"):
         data = load_dataset("ozgur-celik/countdown_cl")
         self.tokenizer = tokenizer
-        # self.test_size = test_size
         self.split = split
         if self.split == "train":
             self.data = data["train"]
@@ -93,7 +92,6 @@ class CountdownTaskDataset(Dataset):
         """Collate examples into a batch."""
         numbers = [item["nums"] for item in batch]
         target = [item["target"] for item in batch]
-        difficulty = [item["difficulty"] for item in batch]
         prefix = [item["prefix"] for item in batch]
 
         input_ids_list = [item["prefix_tokens"] for item in batch]
@@ -233,11 +231,9 @@ def format_reward_function(response: str, end_token: Optional[str] = None) -> fl
     if end_token and response.endswith(end_token):
         response = response[: -len(end_token)]
 
-    think_regex = r"<think>.*?<\/think>"
     answer_regex = r"<answer>.*?<\/answer>\s*$"
     full_format_regex = r"^<think>.*?<\/think>\n<answer>.*?<\/answer>$"
 
-    think_match = re.search(think_regex, response, re.DOTALL)
     answer_match = re.search(answer_regex, response, re.DOTALL)
     full_format_match = re.match(full_format_regex, response, re.DOTALL)
 
@@ -278,6 +274,7 @@ def answer_reward_function(
         return 0.0
 
     # Check if the answer uses all numbers exactly once
+    # Mesela icine targeti da koyduysa burasi exit etmemize sebep olacak
     used_numbers = [int(n) for n in re.findall(r"\d+", answer_content)]
     if sorted(used_numbers) != sorted(numbers):
         return 0.0
