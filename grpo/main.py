@@ -812,18 +812,8 @@ def grpo(
             total_reward += avg_reward_per_batch
 
             if use_wandb:  # first batch of epoch
-                # Build a small table (don’t log huge text every step)
-                table = wandb.Table(columns=["numbers", "target", "response", "reward"])
-                # Log up to 8 samples
-                k = min(8, len(rollout_output["generated_answers"]))
-                for i in range(k):
-                    table.add_data(
-                        str(rollout_output["generated_answers"][i]),
-                        None,  # placeholder (see below)
-                        rollout_output["generated_answers"][i],
-                        float(rollout_output["rewards"][i].item()),
-                    )
-                # Better: attach correct numbers/targets per expanded sample
+                # Build a small table with detailed reward breakdown
+                # Attach correct numbers/targets per expanded sample
                 # (because you repeat each prompt num_return_sequences times)
                 expanded_nums = []
                 expanded_tgts = []
@@ -832,13 +822,23 @@ def grpo(
                         expanded_nums.append(batch.numbers[j])
                         expanded_tgts.append(batch.target[j])
 
-                table = wandb.Table(columns=["numbers", "target", "response", "reward"])
+                table = wandb.Table(columns=[
+                    "numbers", "target", "response", "reward",
+                    "format_reward", "answer_reward", "number_usage_reward", "correctness_reward"
+                ])
+                # Log up to 8 samples
+                k = min(8, len(rollout_output["generated_answers"]))
+                reward_info = rollout_output["reward_info"]
                 for i in range(k):
                     table.add_data(
                         str(expanded_nums[i]),
                         int(expanded_tgts[i]),
                         rollout_output["generated_answers"][i],
                         float(rollout_output["rewards"][i].item()),
+                        float(reward_info["format_reward"][i].item()),
+                        float(reward_info["answer_reward"][i].item()),
+                        float(reward_info["number_usage_reward"][i].item()),
+                        float(reward_info["correctness_reward"][i].item()),
                     )
 
                 wandb.log({"samples/train_generations": table, "train/epoch": epoch + 1}, step=global_step)
