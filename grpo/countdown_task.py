@@ -268,13 +268,16 @@ def answer_reward_function(
     if not answer_match:
         return {"reward": 0.0, "number_usage_reward": 0.0, "correctness_reward": 0.0}
 
-    answer_content = answer_match.group(0)
+    answer_content = answer_match.group(1)
     if not answer_content:
         return {"reward": 0.0, "number_usage_reward": 0.0, "correctness_reward": 0.0}
 
     allowed_chars = r"^[0-9+\-*/() ]+$"
     if not re.match(allowed_chars, answer_content):
         return {"reward": 0.0, "number_usage_reward": 0.0, "correctness_reward": 0.0}
+
+    if is_answer_correct(answer_content, target):
+        return {"reward": 1.0, "number_usage_reward": 1.0, "correctness_reward": 1.0}
 
     reward = 0.0
     number_usage_reward = 0.0
@@ -382,7 +385,7 @@ def number_usage_reward_function(answer_content: str, numbers: list[int], target
     
 
 if __name__ == "__main__":
-    numbers = [1, 2, 3, 4]
-    target = 10
-    response = "1 + 2 + 3 + 4 = 10</think>\n<answer>(1 + 2 + 3 + 4)</answer>"
+    numbers = [11, 6]
+    target = 66
+    response = " We need to make 66 using the numbers 11 and 6 exactly once. Let's try different combinations of addition, subtraction, multiplication, and division.</think>\n<answer>(11 * 6)</answer>"
     print(reward_function(response, numbers, target))
