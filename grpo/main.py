@@ -652,7 +652,8 @@ def grpo(
         device = torch.device("cpu")
 
     # Use bfloat16 for balance between stability and memory (float16 on MPS can cause NaN issues)
-    dtype = torch.bfloat16 if device.type not in ("mps", "cuda") else torch.float32
+    # dtype = torch.bfloat16 if device.type not in ("mps", "cuda") else torch.float32
+    dtype = torch.bfloat16
     # For MPS, we need to be careful with memory - use smaller batch or gradient checkpointing
     model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype, low_cpu_mem_usage=True).to(device)
     ref_model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype, low_cpu_mem_usage=True).to(device)
@@ -926,14 +927,14 @@ if __name__ == "__main__":
     trained_model, losses, rewards, eval_rewards = grpo(
         model_id=model_id,
         dataset=CountdownTaskDataset,
-        train_batch_size=4,  # Reduced for memory
+        train_batch_size=2,  # Reduced for memory
         test_batch_size=8,  # Reduced for memory
         num_epochs=100,
         batch_per_epoch=1,
         update_freq=2,
         max_new_tokens=256,  # Reduced for memory
         temperature=0.6,
-        num_return_sequences=4,  # Reduced for memory
+        num_return_sequences=2,  # Reduced for memory
         epsilon=0.2,
         learning_rate=5e-6,
         test_freq=5,
