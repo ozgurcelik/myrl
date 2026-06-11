@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import numpy as np
 from typing import Optional
 from countdown_task import *
+from reward import *
 
 import wandb
 import os
