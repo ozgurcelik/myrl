@@ -6,9 +6,15 @@ from torch.utils.data import Dataset, Sampler
 from typing import Any, Dict, List, Iterator
 import random
 
+# Plain-text prompt format. This is the SINGLE source of truth for the prompt
+# prefix and is shared by SFT data prep, evaluation, and GRPO. It reproduces the
+# Asap7772/cog_behav_all_strategies SFT format exactly so that the model always
+# sees the same prompt distribution it was fine-tuned on (a base model was never
+# trained on the instruct chat template, so we avoid it entirely).
 SYSTEM_MESSAGE = (
-    "You are a helpful assistant. You first think about the reasoning process "
-    "in your mind and then provide the user with the answer."
+    "A conversation between User and Assistant. The user asks a question, and the "
+    "Assistant solves it. The assistant first thinks about the reasoning process in "
+    "the mind and then provides the user with the answer."
 )
 USER_TEMPLATE = (
     "Using the numbers {numbers}, create an equation that equals {target}. "
@@ -16,7 +22,21 @@ USER_TEMPLATE = (
     "Show your work in <think> </think> tags. "
     "And return the final answer in <answer> </answer> tags, for example <answer> (1 + 2) / 3 </answer>."
 )
-RESPONSE_PROMPT = "Let me solve this step by step.\n<think>"
+# The prefix ends with the opening <think> tag (matching the cog_behav split,
+# where <think> begins the completion). The model therefore generates the
+# reasoning body, and reward.py reconstructs the full block by prepending <think>.
+RESPONSE_PROMPT = "Let me solve this step by step.<think>"
+
+
+def build_prompt(numbers: list[int], target: int) -> str:
+    """Build the plain-text prompt prefix for a countdown problem.
+
+    Equivalent to the Asap7772/cog_behav_all_strategies `query` field with the
+    opening `<think>` tag appended, i.e. exactly the text the model is conditioned
+    on before it starts generating its reasoning.
+    """
+    user_message = USER_TEMPLATE.format(numbers=numbers, target=target)
+    return f"{SYSTEM_MESSAGE}\nUser: {user_message}\nAssistant: {RESPONSE_PROMPT}"
 # %%
 from dataclasses import dataclass
 from typing import Dict, List
@@ -63,17 +83,8 @@ class CountdownTaskDataset(Dataset):
         return len(self.data)
     
     def encode_prefix(self, numbers: list[int] , target: int):
-        user_message = USER_TEMPLATE.format(numbers=numbers, target=target)
-        tokens = self.tokenizer.apply_chat_template(
-            [
-                {"role": "system", "content": SYSTEM_MESSAGE},
-                {"role": "user", "content": user_message},
-                {"role": "assistant", "content": RESPONSE_PROMPT},
-            ],
-            tokenize=True,
-            continue_final_message=True,
-        )
-        prefix = self.tokenizer.decode(tokens)
+        prefix = build_prompt(numbers, target)
+        tokens = self.tokenizer.encode(prefix)
         return {
             "prefix": prefix,
             "prefix_tokens": tokens,

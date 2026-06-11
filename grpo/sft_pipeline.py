@@ -26,20 +26,35 @@ General parameters of the training:
 We use the trl library to train the model and wandb for logging.
 
 Config is hard-coded for a single RTX 4090 (24 GB).
+
+For testing, we will use the ozgur-celik/countdown_cl dataset.
+Specifically, we will take first 1000 examples of the test split.
 """
 
 import os
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
+import torch
 from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import SFTConfig, SFTTrainer
+
+from countdown_task import build_prompt
+from reward import reward_function
 
 # Data / model.
 DATASET_NAME = "Asap7772/cog_behav_all_strategies"
 MODEL_NAME = "Qwen/Qwen2.5-0.5B"
 OUTPUT_DIR = "./sft-qwen2.5-0.5b"
+
+# Test set: first 1000 examples of the countdown_cl test split. Each epoch we
+# generate completions for these prompts and measure the correctness score
+# (reward.py -> correctness_reward).
+TEST_DATASET_NAME = "ozgur-celik/countdown_cl"
+NUM_TEST_EXAMPLES = 1000
+EVAL_BATCH_SIZE = 64
+EVAL_MAX_NEW_TOKENS = 512
 
 # Training hyperparameters (from the spec).
 EPOCHS = 3
@@ -63,15 +78,107 @@ RUN_NAME = "sft-qwen2.5-0.5b"
 def build_dataset():
     """Load the dataset and normalize it into TRL's prompt-completion format.
 
-    TRL expects the columns to be named "prompt" and "completion"; the raw
-    dataset names the prompt column "query".
+    The raw dataset has a `query` (prompt) and a `completion` whose first token
+    is the opening `<think>` tag. We move that `<think>` into the prompt so the
+    training prompt matches build_prompt() byte-for-byte (the format used for
+    evaluation and GRPO). This is exactness-preserving: prompt + completion is
+    identical to the original query + completion.
     """
     dataset = load_dataset(DATASET_NAME)
 
-    if "query" in dataset["train"].column_names:
-        dataset = dataset.rename_column("query", "prompt")
+    def to_prompt_completion(example):
+        completion = example["completion"]
+        if completion.startswith("<think>"):
+            completion = completion[len("<think>") :]
+        return {"prompt": example["query"] + "<think>", "completion": completion}
 
+    dataset = dataset.map(
+        to_prompt_completion,
+        remove_columns=dataset["train"].column_names,
+    )
     return dataset
+
+
+def build_test_examples():
+    """Build the countdown test prompts (first NUM_TEST_EXAMPLES of the test split).
+
+    Uses the shared build_prompt() so the evaluation prompt is byte-for-byte
+    identical to the SFT training prompt (and the upcoming GRPO prompt). We keep
+    the raw numbers/target around so we can score correctness after generation.
+    """
+    data = load_dataset(TEST_DATASET_NAME)["test"]
+    data = data.select(range(min(NUM_TEST_EXAMPLES, len(data))))
+
+    examples = []
+    for item in data:
+        prompt = build_prompt(item["nums"], item["target"])
+        examples.append(
+            {"prompt": prompt, "numbers": item["nums"], "target": item["target"]}
+        )
+    return examples
+
+
+class CorrectnessEvalCallback(TrainerCallback):
+    """At the end of each epoch, generate on the test set and log the mean
+    correctness score (fraction of prompts whose answer evaluates to the target)
+    to Weights & Biases."""
+
+    def __init__(self, tokenizer, examples):
+        self.tokenizer = tokenizer
+        self.examples = examples
+
+    @torch.no_grad()
+    def on_epoch_end(self, args, state, control, model=None, **kwargs):
+        was_training = model.training
+        model.eval()
+        # Generation needs the KV cache, which is disabled under gradient
+        # checkpointing during training.
+        prev_use_cache = model.config.use_cache
+        model.config.use_cache = True
+        prev_padding_side = self.tokenizer.padding_side
+        self.tokenizer.padding_side = "left"
+
+        scores = []
+        for start in range(0, len(self.examples), EVAL_BATCH_SIZE):
+            batch = self.examples[start : start + EVAL_BATCH_SIZE]
+            prompts = [b["prompt"] for b in batch]
+            inputs = self.tokenizer(
+                prompts, return_tensors="pt", padding=True
+            ).to(model.device)
+
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=EVAL_MAX_NEW_TOKENS,
+                do_sample=False,
+                pad_token_id=self.tokenizer.pad_token_id,
+            )
+            generated = outputs[:, inputs["input_ids"].shape[1] :]
+            responses = self.tokenizer.batch_decode(
+                generated, skip_special_tokens=True
+            )
+
+            for response, b in zip(responses, batch):
+                info = reward_function(
+                    response, numbers=b["numbers"], target=b["target"]
+                )["reward_info"]
+                scores.append(info["correctness_reward"])
+
+        score = sum(scores) / len(scores) if scores else 0.0
+
+        self.tokenizer.padding_side = prev_padding_side
+        model.config.use_cache = prev_use_cache
+        if was_training:
+            model.train()
+
+        print(f"[epoch {state.epoch:.0f}] countdown correctness score = {score:.4f}")
+        if state.is_world_process_zero:
+            import wandb
+
+            if wandb.run is not None:
+                wandb.log(
+                    {"eval/correctness_score": score, "epoch": state.epoch},
+                    step=state.global_step,
+                )
 
 
 def main():
@@ -87,6 +194,8 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+
+    test_examples = build_test_examples()
 
     training_args = SFTConfig(
         output_dir=OUTPUT_DIR,
@@ -116,6 +225,7 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         processing_class=tokenizer,
+        callbacks=[CorrectnessEvalCallback(tokenizer, test_examples)],
     )
 
     trainer.train()
