@@ -1,0 +1,24 @@
+# High-level dependency set for the GRPO (TRL + vLLM) pipeline.
+# This is the SOURCE list. Exact, reproducible versions are frozen into
+# requirements.lock by setup.sh after the first successful resolve.
+#
+# torch / transformers / tokenizers are intentionally NOT pinned here:
+#   - torch is selected as a CUDA 12.8 (sm_120-capable) build via
+#     `uv pip install --torch-backend=cu128` in setup.sh, so it runs on
+#     Ampere (sm_86), Ada (sm_89) AND Blackwell RTX PRO (sm_120) GPUs.
+#   - transformers/tokenizers are resolved transitively to versions that
+#     vLLM and TRL agree on (over-pinning them causes resolver conflicts).
+
+# Inference / rollout engine
+vllm>=0.8.5
+
+# RL training (GRPOTrainer + `trl vllm-serve` server mode)
+trl>=0.12.0
+
+# Distributed training + multi-GPU sharding for the backprop GPUs
+accelerate>=1.0.0
+deepspeed>=0.15.0
+
+# Data + experiment tracking
+datasets>=3.0.0
+wandb>=0.18.0
