@@ -1,87 +1,83 @@
-# GRPO environment setup
+# GRPO (TRL + vLLM) on the Countdown task
 
-Reproducible environment for the GRPO (TRL + vLLM) pipeline on RunPod. One
-pinned **CUDA 12.8** stack that runs across every GPU type you might rent
-(Ampere, Ada, Blackwell).
+One pinned **CUDA 12.8** environment that runs on any RunPod GPU (Ampere / Ada /
+Blackwell), plus a single training script that does GRPO with vLLM rollouts.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `setup.sh` | Builds the venv from scratch on a fresh pod, verifies the GPU, freezes the lock |
-| `requirements.in` | High-level source dependencies (edit this to add/change deps) |
-| `requirements.lock` | Exact pinned versions — the durable reproducibility artifact (commit this) |
+| `setup.sh` | Build the venv from the lock on a fresh pod, verify the GPU |
+| `requirements.lock` | Exact pinned versions — the durable, reproducible artifact |
+| `grpo_pipeline.py` | The trainer (reuses `countdown_task.build_prompt` + `reward.reward_function`) |
 
-## Quick start
-
-On any fresh pod:
+## 1. Set up the environment (once per pod)
 
 ```bash
-bash /root/myrl/grpo/setup.sh
-```
-
-Then, in any shell where you want to run the pipeline:
-
-```bash
+bash setup.sh
 source /root/grpo-venv/bin/activate
 ```
 
-That's it. `python`, `vllm`, `trl`, etc. now resolve to the pinned cu128 stack.
+The venv (~12 GB) lives on the ephemeral root disk and is rebuilt each pod;
+`requirements.lock` (in git) is what makes it reproducible. Models are cached on
+`/workspace` (persistent, but ~20 GB quota — watch model sizes).
 
-- **Cold run** (nothing cached): ~7 min, mostly downloading ~6 GB of wheels.
-- **Warm run** (wheels in `/dev/shm` cache from earlier this session): ~90 s.
+## 2. Run GRPO
 
-## What `setup.sh` does
-
-1. Installs `uv` (if missing).
-2. Preflight: prints GPU/driver, warns if the host driver is `< 570` (needed for CUDA 12.8 / Blackwell), checks root disk space.
-3. Creates an isolated venv with a standalone Python 3.12.
-4. Installs the stack with `--torch-backend=cu128`. If `requirements.lock` exists it installs those exact versions; otherwise it resolves `requirements.in` and writes the lock.
-5. Verifies this pod's GPU architecture is supported by the installed torch (and runs a CUDA sanity check).
-6. Clears the temporary wheel cache from `/dev/shm`.
-
-## Storage layout (important on RunPod)
-
-The container is tight on disk, so the script puts things deliberately:
-
-| What | Where | Notes |
-| --- | --- | --- |
-| venv (~12 GB) | `/root/grpo-venv` (root disk) | **Ephemeral** — gone on pod restart. Re-run `setup.sh`. |
-| wheel cache | `/dev/shm` (tmpfs) | Fast, cleared at the end of setup. |
-| HF models / checkpoints | `/workspace/.cache/huggingface` (`HF_HOME`) | **Persistent**, but only a ~20 GB quota — watch model sizes. |
-
-> The venv is intentionally **not** stored on `/workspace`: that volume has a
-> hard ~20 GB quota and can't hold both the venv and your models. The durable,
-> reproducible artifact is `requirements.lock` (in git), not the venv itself.
-
-## Configuration
-
-Override defaults via environment variables:
+**Colocate (simplest — one GPU, one command).** vLLM runs inline with the trainer:
 
 ```bash
-# Re-resolve and re-freeze the lock (e.g. after editing requirements.in)
-RELOCK=1 bash setup.sh
+python grpo_pipeline.py
+```
 
-# Put the venv somewhere else (e.g. if you enlarged /workspace)
-ENV_DIR=/workspace/envs/grpo bash setup.sh
+**Server (vLLM on a separate GPU).** Two commands in two terminals:
 
-# Pin a different Python or CUDA backend
-PY_VERSION=3.11 TORCH_BACKEND=cu126 bash setup.sh
+```bash
+# Terminal 1 — rollout server on GPU 0
+CUDA_VISIBLE_DEVICES=0 trl vllm-serve --model Qwen/Qwen2.5-1.5B-Instruct --enforce_eager
+
+# Terminal 2 — trainer on GPU 1 (connects to the server, syncs weights)
+CUDA_VISIBLE_DEVICES=1 VLLM_MODE=server python grpo_pipeline.py
+```
+
+Stop the server with **Ctrl-C** in terminal 1 (cleans up its workers properly).
+
+### Common knobs (env vars)
+
+`MODEL_ID`, `MAX_STEPS`, `NUM_GEN`, `TRAIN_BS`, `GRAD_ACCUM`, `MAX_COMPLETION`,
+`LR`, `KL_BETA`, `REPORT_TO` (set `wandb` to log), `OUTPUT_DIR`. Batch/generation
+sizes auto-tune to the GPU's VRAM if not set.
+
+```bash
+MODEL_ID=Qwen/Qwen2.5-0.5B-Instruct MAX_STEPS=2 python grpo_pipeline.py   # quick smoke test
+REPORT_TO=wandb MAX_STEPS=1000 python grpo_pipeline.py
 ```
 
 ## GPU compatibility
 
-The installed torch reports `sm_75, sm_80, sm_86, sm_90, sm_100, sm_120`, which
-covers all rentable GPUs:
+The pinned torch (`2.10.0+cu128`) reports
+`sm_75, sm_80, sm_86, sm_90, sm_100, sm_120`, covering all rentable GPUs: Ampere
+(native `sm_86`), Ada (runs on the `sm_86` cubin), and Blackwell RTX PRO (native
+`sm_120`). When renting, prefer pods with **CUDA ≥ 12.8 / driver ≥ 570**; `setup.sh`
+warns otherwise.
 
-- **Ampere** (A40, A6000, A5000, A4500, A4000) — native `sm_86`
-- **Ada** (L4, L40, L40S, RTX 2000/4000/6000 Ada) — runs on the `sm_86` cubin (CUDA binary compat within compute major 8)
-- **Blackwell** (RTX PRO 4000/4500/6000) — native `sm_120`
+## Environment quirks (already handled)
 
-When renting, prefer pods advertised with **CUDA ≥ 12.8** (host driver ≥ 570),
-especially for Blackwell cards. `setup.sh` warns if the driver is too old.
+1. **`hf-xet` download backend hangs** — `grpo_pipeline.py` sets
+   `HF_HUB_DISABLE_XET=1`; pass it to `trl vllm-serve` too (shown above). If a
+   download stalls, clear stale locks: `find $HF_HOME -name '*.lock' -delete`.
+2. **`/dev/shm` is `noexec`** — JIT-compiled kernels can't load from there. Keep
+   `TMPDIR` on the root disk (`/tmp`); don't point it at `/dev/shm`.
+3. **vLLM must be cu128** — vLLM ≥ 0.20 ships CUDA-13 wheels that won't run on a
+   12.8 driver, and TRL 1.6 only supports vLLM ≤ 0.19. The lock pins
+   `vllm==0.19.0` (the compatible ceiling). Don't bump it without re-checking both.
+4. **`trl vllm-serve` needs `--enforce_eager`** — its torch.compile/CUDA-graph
+   capture hangs at startup here; eager mode starts reliably.
+
+To change dependencies: install into the venv with `uv pip install ...`, then
+re-freeze with `uv pip freeze > requirements.lock`.
 
 ## Notes
 
-- This venv is fully isolated from the RunPod base Python (3.11 + torch 2.4.1+cu124). The base is left untouched; just remember to `activate` the venv before running anything, or you'll get the old cu124 torch (which won't run on Blackwell).
-- To regenerate the lock after changing dependencies, edit `requirements.in` then run `RELOCK=1 bash setup.sh`.
+- The venv is isolated from the RunPod base Python (3.11 + torch 2.4.1+cu124);
+  always `activate` it first.

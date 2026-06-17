@@ -17,12 +17,11 @@
 #   - /workspace is a small (~20GB) PERSISTENT network volume with a hard quota,
 #     so we only put the HuggingFace model cache there (not the venv/cache).
 #
-# Idempotent: if requirements.lock exists it installs the exact pinned versions;
-# otherwise it resolves requirements.in and freezes the lock for next time.
+# Installs the exact pinned versions from requirements.lock. Re-run on each
+# fresh pod (the venv is ephemeral; the lock in git is the durable artifact).
 #
 # Usage:
 #   bash setup.sh
-#   RELOCK=1 bash setup.sh           # ignore existing lock and re-resolve
 #   ENV_DIR=/workspace/envs/grpo bash setup.sh   # only if you enlarged /workspace
 # ---------------------------------------------------------------------------
 set -euo pipefail
@@ -34,7 +33,6 @@ WORKSPACE="${WORKSPACE:-/workspace}"
 ENV_DIR="${ENV_DIR:-/root/grpo-venv}"          # ephemeral, on root disk
 PY_VERSION="${PY_VERSION:-3.12}"
 TORCH_BACKEND="${TORCH_BACKEND:-cu128}"
-REQ_FILE="${REQ_FILE:-$SCRIPT_DIR/requirements.in}"
 LOCK_FILE="${LOCK_FILE:-$SCRIPT_DIR/requirements.lock}"
 MIN_ROOT_GB="${MIN_ROOT_GB:-17}"               # rough venv footprint guard
 
@@ -87,16 +85,12 @@ uv venv --python "$PY_VERSION" --seed "$ENV_DIR"
 # shellcheck disable=SC1091
 source "$ENV_DIR/bin/activate"
 
-# --- 4. Install the pinned stack -------------------------------------------
-if [ -f "$LOCK_FILE" ] && [ "${RELOCK:-0}" != "1" ]; then
-  echo "==> Installing exact pins from $LOCK_FILE"
-  uv pip install -r "$LOCK_FILE" --torch-backend="$TORCH_BACKEND"
-else
-  echo "==> Resolving from $REQ_FILE (will freeze a lock afterwards)"
-  uv pip install -r "$REQ_FILE" --torch-backend="$TORCH_BACKEND"
-  echo "==> Freezing exact versions -> $LOCK_FILE"
-  uv pip freeze > "$LOCK_FILE"
+# --- 4. Install the pinned stack from the lock -----------------------------
+if [ ! -f "$LOCK_FILE" ]; then
+  echo "ERROR: $LOCK_FILE not found."; exit 1
 fi
+echo "==> Installing exact pins from $LOCK_FILE"
+uv pip install -r "$LOCK_FILE" --torch-backend="$TORCH_BACKEND"
 
 # --- 5. Verify torch supports THIS pod's GPU architecture -------------------
 echo "==> Verifying GPU compatibility"
